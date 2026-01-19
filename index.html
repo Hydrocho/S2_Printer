@@ -3,84 +3,187 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>S2 Mini 최종 연결</title>
+    <title>S2 Mini 포토 프린터</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; text-align: center; background: #eee; }
-        button { padding: 20px; width: 100%; margin: 10px 0; font-size: 18px; border-radius: 15px; border: none; font-weight: bold; box-shadow: 0 5px 10px rgba(0,0,0,0.1); }
-        .btn-connect { background: #007aff; color: white; }
-        .btn-print { background: #34c759; color: white; }
-        .log-box { background: #000; color: #0f0; padding: 15px; border-radius: 10px; text-align: left; height: 200px; overflow-y: scroll; font-size: 13px; font-family: monospace; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; text-align: center; background: #f8f9fa; }
+        h2 { margin-bottom: 10px; }
+        
+        /* 버튼 스타일 */
+        button, label { 
+            display: block;
+            padding: 15px 0; 
+            width: 100%; 
+            margin: 10px 0; 
+            font-size: 16px; 
+            border-radius: 12px; 
+            border: none; 
+            font-weight: bold; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            cursor: pointer;
+        }
+        .btn-connect { background: #007bff; color: white; }
+        .btn-select { background: #6c757d; color: white; }
+        .btn-print { background: #28a745; color: white; }
+        .btn-print:disabled { background: #ccc; }
+
+        #status { font-size: 14px; color: #555; margin: 10px 0; min-height: 20px;}
+        
+        /* 미리보기 캔버스 (숨김) */
+        canvas { border: 1px solid #ddd; margin-top: 10px; max-width: 100%; display: none; }
+        #preview { display: block; margin: 0 auto; filter: grayscale(100%); }
     </style>
 </head>
 <body>
 
-    <h2>S2 Mini 최종 연결</h2>
-    <p>아이폰 재부팅 후 시도해주세요.</p>
+    <h2>S2 Mini 포토 프린터</h2>
+    <div id="status">준비 완료. 프린터를 연결하세요.</div>
 
-    <button class="btn-connect" onclick="connectByService()">🎯 프린터 찾기 (서비스ID)</button>
-    <button id="printBtn" class="btn-print" onclick="printTest()" disabled>🖨️ 종이 밀기</button>
+    <button class="btn-connect" onclick="connectByService()">🔵 1. 프린터 연결하기</button>
 
-    <div id="log-area" class="log-box">대기 중...</div>
+    <label class="btn-select" id="fileLabel" style="display:none;">
+        📷 2. 사진 선택하기
+        <input type="file" id="imageInput" accept="image/*" style="display: none;" onchange="loadImage()">
+    </label>
+
+    <button id="printBtn" class="btn-print" onclick="printImage()" disabled>🖨️ 3. 인쇄 시작</button>
+
+    <canvas id="canvas"></canvas>
 
     <script>
         let printCharacteristic = null;
+        const PRINTER_WIDTH = 384; // S2 Mini의 가로 픽셀 폭 (고정)
 
-        function log(msg) {
-            const box = document.getElementById('log-area');
-            const time = new Date().toLocaleTimeString().split(' ')[0];
-            box.innerHTML = `[${time}] ${msg}<br>` + box.innerHTML;
-        }
-
+        // 1. 프린터 연결 (아까 성공한 그 코드)
         async function connectByService() {
-            if (!navigator.bluetooth) {
-                log("❌ Bluefy 앱이 아닙니다.");
-                return;
-            }
-
             try {
-                log("📡 프린터 신호(0x18F0) 스캔 중...");
-                
-                // [최종 방법] 이름 필터 다 빼고, 오직 '서비스 ID'로만 찾습니다.
-                // 이 방법이 가장 정확합니다.
+                updateStatus("📡 프린터 찾는 중...");
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ services: [0x18f0] }] 
                 });
 
-                log(`✅ 기기 발견: ${device.name}`);
-                
-                device.addEventListener('gattserverdisconnected', () => {
-                    log("⚠️ 연결 끊김");
-                    document.getElementById('printBtn').disabled = true;
-                });
-
-                log("연결 시도 중...");
+                updateStatus("연결 시도 중...");
                 const server = await device.gatt.connect();
-                
-                log("서비스 인증 중...");
                 const service = await server.getPrimaryService(0x18f0);
-                
-                log("쓰기 권한 확보 중...");
                 printCharacteristic = await service.getCharacteristic(0x2af1);
 
-                log("🎉 연결 성공! 버튼이 활성화됩니다.");
-                document.getElementById('printBtn').disabled = false;
-
+                updateStatus("✅ 연결 성공! 사진을 선택하세요.");
+                
+                // UI 활성화
+                document.querySelector('.btn-connect').style.display = 'none';
+                document.getElementById('fileLabel').style.display = 'block';
+                
             } catch (error) {
-                log(`❌ 실패: ${error}`);
-                log("👉 팁: 아이폰을 껐다 켜셨나요?");
+                updateStatus("❌ 연결 실패: " + error);
             }
         }
 
-        async function printTest() {
-            if (!printCharacteristic) return;
-            try {
-                // 종이 밀기 (Feed)
-                const data = new Uint8Array([0x1B, 0x4A, 100]);
-                await printCharacteristic.writeValue(data);
-                log("📤 전송 완료!");
-            } catch (error) {
-                log(`❌ 전송 실패: ${error}`);
+        // 2. 이미지 불러오기 및 흑백 변환
+        function loadImage() {
+            const input = document.getElementById('imageInput');
+            if (!input.files || !input.files[0]) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    processImage(img);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+
+        function processImage(img) {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // 비율 유지하면서 너비를 384px로 조정
+            const scale = PRINTER_WIDTH / img.width;
+            const height = img.height * scale;
+
+            canvas.width = PRINTER_WIDTH;
+            canvas.height = height;
+            canvas.style.display = 'block';
+
+            // 흰색 배경 깔기 (투명 이미지 대응)
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, PRINTER_WIDTH, height);
+
+            // 흑백 변환 (이진화)
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imgData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+                // 밝기 계산
+                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                // 기준보다 어두우면 검정(0), 밝으면 흰색(255)
+                const color = avg < 128 ? 0 : 255;
+                data[i] = data[i + 1] = data[i + 2] = color;
             }
+            ctx.putImageData(imgData, 0, 0);
+
+            // 인쇄 버튼 활성화
+            document.getElementById('printBtn').disabled = false;
+            updateStatus("이미지 준비 완료. 인쇄 버튼을 누르세요.");
+        }
+
+        // 3. 실제 인쇄 (데이터 전송)
+        async function printImage() {
+            if (!printCharacteristic) return;
+            
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // GS v 0 (래스터 비트 이미지 인쇄 명령)
+            // 포맷: 0x1D 0x76 0x30 0x00 (xL xH) (yL yH) [데이터...]
+            const widthBytes = PRINTER_WIDTH / 8; // 48 bytes
+            const height = canvas.height;
+
+            updateStatus("🖨️ 데이터 전송 중... 기다려주세요.");
+
+            // 데이터 패킷 생성
+            // 참고: 한 번에 너무 많이 보내면 끊기므로 한 줄씩 보냅니다.
+            for (let y = 0; y < height; y++) {
+                
+                // 1. 헤더 (GS v 0 ...)
+                // 높이 1줄씩 쪼개서 보냅니다.
+                let cmd = [0x1D, 0x76, 0x30, 0x00, widthBytes, 0x00, 0x01, 0x00];
+                let lineData = [];
+
+                // 2. 픽셀 데이터 비트 패킹 (8개를 1바이트로 압축)
+                for (let x = 0; x < PRINTER_WIDTH; x += 8) {
+                    let byte = 0;
+                    for (let b = 0; b < 8; b++) {
+                        // 검정색(0)이면 비트를 1로 설정 (프린터는 1이 인쇄임)
+                        const pixelIndex = ((y * PRINTER_WIDTH) + (x + b)) * 4;
+                        if (imgData.data[pixelIndex] === 0) {
+                            byte |= (1 << (7 - b));
+                        }
+                    }
+                    lineData.push(byte);
+                }
+
+                // 명령어 + 데이터 합치기
+                let packet = new Uint8Array(cmd.concat(lineData));
+                
+                // 블루투스로 전송
+                await printCharacteristic.writeValue(packet);
+                
+                // 너무 빠르면 꼬일 수 있으니 약간의 딜레이
+                // await new Promise(r => setTimeout(r, 10)); 
+            }
+
+            // 다 찍고 나면 종이 좀 밀어주기 (Feed 3줄)
+            const feed = new Uint8Array([0x1B, 0x4A, 100]);
+            await printCharacteristic.writeValue(feed);
+            
+            updateStatus("🎉 인쇄 완료!");
+        }
+
+        function updateStatus(msg) {
+            document.getElementById('status').innerText = msg;
         }
     </script>
 </body>
