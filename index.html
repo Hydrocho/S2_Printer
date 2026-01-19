@@ -3,177 +3,110 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>S2 Mini 프린터 연결 (필터 수정판)</title>
+    <title>S2 Mini 프린터 (전체 검색)</title>
     <style>
-        /* 깔끔한 모바일 UI 스타일 */
         body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            font-family: -apple-system, sans-serif; 
             padding: 20px; 
             text-align: center; 
-            background-color: #f8f9fa;
+            background-color: #f4f4f4;
         }
-        h2 { color: #333; margin-bottom: 10px; }
-        .guide { 
-            background: #e9ecef; 
-            padding: 10px; 
-            border-radius: 8px; 
-            font-size: 14px; 
-            color: #555; 
-            margin-bottom: 20px;
-            text-align: left;
-        }
-        
-        /* 버튼 스타일 */
         button { 
-            padding: 16px 0; 
-            font-size: 17px; 
-            font-weight: 600;
-            margin: 8px 0; 
+            padding: 15px 0; 
+            font-size: 18px; 
+            margin: 10px 0; 
             width: 100%; 
             border-radius: 12px; 
             border: none; 
-            cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            transition: all 0.2s;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        button:active { transform: scale(0.96); }
-        
         .btn-connect { background-color: #007bff; color: white; }
         .btn-print { background-color: #28a745; color: white; }
-        .btn-print:disabled { background-color: #cbd3da; cursor: not-allowed; }
-
-        /* 로그 창 스타일 */
+        .btn-print:disabled { background-color: #ccc; }
+        
         #log-area {
             margin-top: 20px;
-            padding: 15px;
-            background: #212529;
-            color: #00ff00;
-            border-radius: 10px;
+            padding: 10px;
+            background: #222;
+            color: #0f0;
+            border-radius: 8px;
             text-align: left;
-            height: 250px;
+            height: 200px;
             overflow-y: auto;
             font-size: 12px;
-            font-family: 'Courier New', monospace;
-            line-height: 1.5;
+            font-family: monospace;
         }
-        .log-time { color: #888; margin-right: 5px; }
-        .log-error { color: #ff6b6b; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <h2>S2 Mini 연결 테스트</h2>
+    <h2>모든 기기 검색 모드</h2>
+    <p>목록이 뜨면 <b>S2-1B71</b>을 선택하세요.</p>
 
-    <div class="guide">
-        <b>💡 연결 전 필수 확인:</b><br>
-        1. 아이폰 설정 > 블루투스 > S2-1B71 <b>[이 기기 지우기]</b> 필수!<br>
-        2. 다른 앱(LightBlue 등) 완전히 종료.<br>
-        3. 프린터 껐다가 다시 켜기.
-    </div>
+    <button class="btn-connect" onclick="connectToPrinter()">🔍 주변 기기 전체 검색</button>
+    <button id="printBtn" class="btn-print" onclick="printTest()" disabled>🖨️ 연결 후 테스트</button>
 
-    <button class="btn-connect" onclick="connectToPrinter()">🔵 S2 프린터 찾기</button>
-    <button id="printBtn" class="btn-print" onclick="printTest()" disabled>🖨️ 종이 밀기 (Feed)</button>
-
-    <div id="log-area">
-        <div>준비 완료. [S2 프린터 찾기]를 눌러주세요.</div>
-    </div>
+    <div id="log-area">대기 중...</div>
 
     <script>
         let printCharacteristic = null;
-        let printDevice = null;
 
-        // 로그 출력 함수
-        function log(msg, type = 'normal') {
-            const logArea = document.getElementById('log-area');
-            const entry = document.createElement('div');
-            const time = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-            
-            let content = `<span class="log-time">[${time}]</span> ${msg}`;
-            if (type === 'error') {
-                content = `<span class="log-time">[${time}]</span> <span class="log-error">${msg}</span>`;
-            }
-            
-            entry.innerHTML = content;
-            logArea.prepend(entry); // 최신 로그가 맨 위에
+        function log(msg) {
+            const box = document.getElementById('log-area');
+            const time = new Date().toLocaleTimeString().split(' ')[0];
+            box.innerHTML = `[${time}] ${msg}<br>` + box.innerHTML;
         }
 
-        // 1. 연결 함수 (필터 방식 변경)
         async function connectToPrinter() {
             if (!navigator.bluetooth) {
-                log("❌ Web Bluetooth를 지원하지 않습니다. Bluefy 앱을 쓰세요.", 'error');
+                log("❌ Bluefy 앱으로 접속해주세요.");
                 return;
             }
 
             try {
-                log("🔎 장치 검색 중 (이름: S2...)...");
-
-                // [핵심 변경] acceptAllDevices 대신 filters 사용
-                // 님의 스크린샷에 나온 이름 'S2'로 시작하는 기기만 찾습니다.
+                log("🔎 주변의 모든 기기를 검색합니다...");
+                
+                // [수정됨] 필터 없이 모든 기기 허용 (acceptAllDevices: true)
+                // 단, S2 프린터와 통신하려면 optionalServices는 꼭 있어야 합니다.
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [
-                        { namePrefix: "S2" } 
-                    ],
-                    optionalServices: [0x18f0] // 서비스 UUID (필수)
+                    acceptAllDevices: true,
+                    optionalServices: [0x18f0] 
                 });
 
-                printDevice = device;
-                log(`✅ 기기 발견: ${device.name}`);
-                log("⏳ GATT 서버 연결 시도...");
+                log(`👉 선택된 기기: ${device.name}`);
+                
+                device.addEventListener('gattserverdisconnected', () => {
+                    log("⚠️ 연결이 끊어졌습니다.");
+                    document.getElementById('printBtn').disabled = true;
+                });
 
-                // 연결 끊김 감지
-                device.addEventListener('gattserverdisconnected', onDisconnected);
-
+                log("연결 시도 중...");
                 const server = await device.gatt.connect();
-                log("🔗 서버 연결됨. 서비스(0x18F0) 조회...");
-
+                
+                log("서비스(0x18F0) 찾는 중...");
                 const service = await server.getPrimaryService(0x18f0);
-                log("📦 서비스 확보. 특성(0x2AF1) 조회...");
-
-                // 스크린샷에서 확인된 Write UUID
+                
+                log("통신 채널(0x2AF1) 연결 중...");
                 printCharacteristic = await service.getCharacteristic(0x2af1);
-                
-                log("🎉 연결 성공! 인쇄 준비 완료.", 'success');
-                
-                // 버튼 활성화
-                const btn = document.getElementById('printBtn');
-                btn.disabled = false;
-                btn.innerText = "🖨️ 종이 밀기 (Feed)";
+
+                log("✅ 연결 성공! 테스트 버튼을 누르세요.");
+                document.getElementById('printBtn').disabled = false;
 
             } catch (error) {
-                log(`❌ 연결 실패: ${error.message || error}`, 'error');
-                
-                if (error.toString().includes("cancelled")) {
-                    log("👉 목록에서 기기를 선택하지 않고 취소하셨거나, 기기가 검색되지 않았습니다.");
-                } else {
-                    log("👉 팁: 프린터 전원을 껐다 켜고 다시 시도해보세요.");
-                }
+                log(`❌ 에러: ${error}`);
             }
         }
 
-        // 2. 연결 끊김 처리
-        function onDisconnected(event) {
-            log("⚠️ 연결이 끊어졌습니다.", 'error');
-            document.getElementById('printBtn').disabled = true;
-            printCharacteristic = null;
-        }
-
-        // 3. 테스트 명령 전송
         async function printTest() {
-            if (!printCharacteristic) {
-                log("❌ 연결되지 않았습니다.", 'error');
-                return;
-            }
-
+            if (!printCharacteristic) return;
             try {
-                log("📤 데이터 전송 중 (Feed)...");
-                
-                // ESC J 100 (종이 100만큼 밀기)
+                // 종이 밀기 명령어 (Feed)
                 const data = new Uint8Array([0x1B, 0x4A, 100]);
                 await printCharacteristic.writeValue(data);
-                
-                log("✅ 전송 완료! 프린터가 반응했나요?");
+                log("📤 전송 완료!");
             } catch (error) {
-                log(`❌ 전송 실패: ${error}`, 'error');
+                log(`❌ 전송 실패: ${error}`);
             }
         }
     </script>
