@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S2 Mini 프린터 연결</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; text-align: center; }
+        button { padding: 15px 30px; font-size: 18px; margin: 10px; width: 80%; border-radius: 10px; border: none; }
+        .btn-connect { background-color: #007bff; color: white; }
+        .btn-print { background-color: #28a745; color: white; }
+        #status { margin-top: 20px; color: #666; }
+    </style>
+</head>
+<body>
+
+    <h2>S2 Mini 웹 프린터</h2>
+    <p>아래 버튼을 눌러 프린터를 연결하세요.</p>
+
+    <button class="btn-connect" onclick="connectToPrinter()">🔵 블루투스 연결</button>
+    <br>
+    <button class="btn-print" onclick="printTest()">🖨️ 종이 밀기 (Feed)</button>
+
+    <div id="status">상태: 연결 대기중...</div>
+
+    <script>
+        let printCharacteristic = null;
+
+        // 1. S2 Mini 연결 함수
+        async function connectToPrinter() {
+            try {
+                updateStatus("장치 검색 중...");
+                
+                // 스크린샷에서 찾은 UUID 입력
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'S2' }], // 이름이 S2로 시작하는 기기 찾기
+                    optionalServices: [0x18f0]       // 서비스 UUID (0x18F0)
+                });
+
+                updateStatus("GATT 서버 연결 중...");
+                const server = await device.gatt.connect();
+
+                updateStatus("서비스 찾는 중...");
+                const service = await server.getPrimaryService(0x18f0);
+
+                updateStatus("쓰기 채널(Characteristic) 찾는 중...");
+                // 스크린샷에서 찾은 Write UUID (0x2AF1)
+                printCharacteristic = await service.getCharacteristic(0x2af1);
+
+                updateStatus("✅ 연결 성공! 인쇄 준비 완료.");
+                alert("연결되었습니다! 이제 인쇄 버튼을 눌러보세요.");
+
+            } catch (error) {
+                console.error(error);
+                updateStatus("❌ 연결 실패: " + error);
+            }
+        }
+
+        // 2. 테스트 인쇄 (종이 밀기)
+        async function printTest() {
+            if (!printCharacteristic) {
+                alert("먼저 프린터를 연결해주세요!");
+                return;
+            }
+
+            try {
+                // S2 Mini용 간단한 Feed 명령어 (Hex: 1B 4A 40 - 64만큼 밀기)
+                // 만약 반응이 없으면 기종에 따라 명령어가 다를 수 있습니다.
+                // 텍스트 대신 'Byte 배열'을 보내야 합니다.
+                const feedCommand = new Uint8Array([0x1B, 0x4A, 0x40]); 
+                
+                await printCharacteristic.writeValue(feedCommand);
+                updateStatus("데이터 전송 완료!");
+            } catch (error) {
+                updateStatus("❌ 전송 실패: " + error);
+            }
+        }
+
+        function updateStatus(msg) {
+            document.getElementById('status').innerText = msg;
+        }
+    </script>
+</body>
+</html>
