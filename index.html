@@ -3,81 +3,156 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>S2 Mini 프린터 연결</title>
+    <title>S2 Mini 프린터 연결 (수정판)</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; text-align: center; }
-        button { padding: 15px 30px; font-size: 18px; margin: 10px; width: 80%; border-radius: 10px; border: none; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            padding: 20px; 
+            text-align: center; 
+            background-color: #f4f4f4;
+        }
+        h2 { color: #333; }
+        p { color: #666; margin-bottom: 30px; }
+        
+        button { 
+            padding: 15px 0; 
+            font-size: 18px; 
+            font-weight: bold;
+            margin: 10px 0; 
+            width: 100%; 
+            max-width: 300px;
+            border-radius: 12px; 
+            border: none; 
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.98); }
+        
         .btn-connect { background-color: #007bff; color: white; }
         .btn-print { background-color: #28a745; color: white; }
-        #status { margin-top: 20px; color: #666; }
+        .btn-print:disabled { background-color: #ccc; }
+
+        /* 로그 창 스타일 */
+        #log-area {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+            height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+            font-family: monospace;
+            color: #333;
+        }
+        .log-entry { border-bottom: 1px solid #eee; padding: 2px 0; }
+        .error { color: red; font-weight: bold; }
+        .success { color: green; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <h2>S2 Mini 웹 프린터</h2>
-    <p>아래 버튼을 눌러 프린터를 연결하세요.</p>
+    <h2>S2 Mini 연결 테스트</h2>
+    <p>반드시 <b>Bluefy 앱</b>으로 접속해주세요.</p>
 
-    <button class="btn-connect" onclick="connectToPrinter()">🔵 블루투스 연결</button>
+    <button class="btn-connect" onclick="connectToPrinter()">🔵 장치 찾기 & 연결</button>
     <br>
-    <button class="btn-print" onclick="printTest()">🖨️ 종이 밀기 (Feed)</button>
+    <button id="printBtn" class="btn-print" onclick="printTest()" disabled>🖨️ 테스트 (종이 밀기)</button>
 
-    <div id="status">상태: 연결 대기중...</div>
+    <div id="log-area">
+        <div class="log-entry">대기 중... 버튼을 눌러주세요.</div>
+    </div>
 
     <script>
         let printCharacteristic = null;
+        let printDevice = null;
 
-        // 1. S2 Mini 연결 함수
-        async function connectToPrinter() {
-            try {
-                updateStatus("장치 검색 중...");
-                
-                // 스크린샷에서 찾은 UUID 입력
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: 'S2' }], // 이름이 S2로 시작하는 기기 찾기
-                    optionalServices: [0x18f0]       // 서비스 UUID (0x18F0)
-                });
-
-                updateStatus("GATT 서버 연결 중...");
-                const server = await device.gatt.connect();
-
-                updateStatus("서비스 찾는 중...");
-                const service = await server.getPrimaryService(0x18f0);
-
-                updateStatus("쓰기 채널(Characteristic) 찾는 중...");
-                // 스크린샷에서 찾은 Write UUID (0x2AF1)
-                printCharacteristic = await service.getCharacteristic(0x2af1);
-
-                updateStatus("✅ 연결 성공! 인쇄 준비 완료.");
-                alert("연결되었습니다! 이제 인쇄 버튼을 눌러보세요.");
-
-            } catch (error) {
-                console.error(error);
-                updateStatus("❌ 연결 실패: " + error);
-            }
+        // 화면에 로그를 찍는 함수
+        function log(message, type = 'normal') {
+            const logArea = document.getElementById('log-area');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            if (type === 'error') entry.className += ' error';
+            if (type === 'success') entry.className += ' success';
+            
+            const time = new Date().toLocaleTimeString();
+            entry.innerText = `[${time}] ${message}`;
+            
+            logArea.prepend(entry); // 최신 로그가 위로 오게
         }
 
-        // 2. 테스트 인쇄 (종이 밀기)
-        async function printTest() {
-            if (!printCharacteristic) {
-                alert("먼저 프린터를 연결해주세요!");
+        // 1. 연결 함수
+        async function connectToPrinter() {
+            // 브라우저 호환성 체크
+            if (!navigator.bluetooth) {
+                log("❌ 이 브라우저는 블루투스를 지원하지 않습니다. 아이폰이라면 'Bluefy' 앱을 사용하세요.", 'error');
                 return;
             }
 
             try {
-                // S2 Mini용 간단한 Feed 명령어 (Hex: 1B 4A 40 - 64만큼 밀기)
-                // 만약 반응이 없으면 기종에 따라 명령어가 다를 수 있습니다.
-                // 텍스트 대신 'Byte 배열'을 보내야 합니다.
-                const feedCommand = new Uint8Array([0x1B, 0x4A, 0x40]); 
+                log("장치 검색을 시작합니다...");
                 
-                await printCharacteristic.writeValue(feedCommand);
-                updateStatus("데이터 전송 완료!");
+                // [중요] 필터 없이 모든 기기를 검색합니다.
+                // optionalServices에 0x18f0을 꼭 넣어야 나중에 접근 권한이 생깁니다.
+                const device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true, 
+                    optionalServices: [0x18f0] 
+                });
+
+                printDevice = device;
+                log(`기기 선택됨: ${device.name}`);
+                
+                // 연결 끊김 감지 리스너
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+                log("GATT 서버에 연결 시도 중...");
+                const server = await device.gatt.connect();
+                
+                log("서비스(0x18F0) 찾는 중...");
+                const service = await server.getPrimaryService(0x18f0);
+                
+                log("특성(0x2AF1) 찾는 중...");
+                printCharacteristic = await service.getCharacteristic(0x2af1);
+
+                log("✅ 연결 성공! 이제 인쇄 가능합니다.", 'success');
+                document.getElementById('printBtn').disabled = false;
+                document.getElementById('printBtn').innerText = "🖨️ 테스트 (종이 밀기)";
+
             } catch (error) {
-                updateStatus("❌ 전송 실패: " + error);
+                log("❌ 연결 실패: " + error, 'error');
+                console.error(error);
             }
         }
 
-        function updateStatus(msg) {
-            document.getElementById('status').innerText = msg;
+        // 2. 연결 끊김 처리
+        function onDisconnected(event) {
+            log("⚠️ 연결이 끊어졌습니다.", 'error');
+            document.getElementById('printBtn').disabled = true;
+            printCharacteristic = null;
+        }
+
+        // 3. 테스트 인쇄 (Feed)
+        async function printTest() {
+            if (!printCharacteristic) {
+                log("연결이 되어있지 않습니다.", 'error');
+                return;
+            }
+
+            try {
+                log("데이터 전송 중...");
+                
+                // S2 Mini용 Feed 명령어 (ESC J n)
+                // 0x1B(ESC) 0x4A(J) 0x40(64만큼 이동)
+                const data = new Uint8Array([0x1B, 0x4A, 0x64]);
+                
+                await printCharacteristic.writeValue(data);
+                log("✅ 전송 완료! (반응이 있나요?)", 'success');
+                
+            } catch (error) {
+                log("❌ 전송 실패: " + error, 'error');
+            }
         }
     </script>
 </body>
